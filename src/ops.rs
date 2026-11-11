@@ -59,6 +59,8 @@ pub struct BoardData {
     pub labels: Vec<Label>,
     pub card_labels: HashMap<i64, Vec<Label>>,
     pub card_assignees: HashMap<i64, Vec<Person>>,
+    /// Card id -> key of the Jira issue created from it.
+    pub jira: HashMap<i64, String>,
 }
 
 const CARD_SELECT: &str = "SELECT c.id, c.board_id, c.column_id, c.title, c.description, c.created_by, c.created_at, \
@@ -201,7 +203,13 @@ pub async fn load_board(db: &Db, board_id: i64) -> Res<BoardData> {
     for (card_id, id, username, display_name) in rows {
         card_assignees.entry(card_id).or_default().push(Person { id, username, display_name });
     }
+    let jira: Vec<(i64, String)> =
+        query_as("SELECT l.card_id, l.issue_key FROM jira_links l JOIN cards c ON c.id = l.card_id WHERE c.board_id = ?")
+            .bind(board_id)
+            .fetch_all(db)
+            .await?;
     Ok(BoardData {
+        jira: jira.into_iter().collect(),
         columns: columns(db, board_id).await?,
         labels: labels(db, board_id).await?,
         board,
@@ -432,6 +440,9 @@ async fn delete_card_in<C: Conn + ?Sized>(conn: &C, id: i64) -> Res<()> {
     run_all(
         conn,
         &[
+            "DELETE FROM jira_links WHERE card_id = ?",
+            "DELETE FROM jira_comments WHERE card_id = ?",
+            "DELETE FROM jira_files WHERE card_id = ?",
             "DELETE FROM card_labels WHERE card_id = ?",
             "DELETE FROM card_assignees WHERE card_id = ?",
             "DELETE FROM comments WHERE card_id = ?",
@@ -446,6 +457,9 @@ async fn delete_board_in<C: Conn + ?Sized>(conn: &C, id: i64) -> Res<()> {
     run_all(
         conn,
         &[
+            "DELETE FROM jira_links WHERE card_id IN (SELECT id FROM cards WHERE board_id = ?)",
+            "DELETE FROM jira_comments WHERE card_id IN (SELECT id FROM cards WHERE board_id = ?)",
+            "DELETE FROM jira_files WHERE card_id IN (SELECT id FROM cards WHERE board_id = ?)",
             "DELETE FROM card_labels WHERE card_id IN (SELECT id FROM cards WHERE board_id = ?)",
             "DELETE FROM card_assignees WHERE card_id IN (SELECT id FROM cards WHERE board_id = ?)",
             "DELETE FROM comments WHERE card_id IN (SELECT id FROM cards WHERE board_id = ?)",
@@ -469,7 +483,7 @@ async fn delete_project_in<C: Conn + ?Sized>(conn: &C, id: i64) -> Res<()> {
     for (board_id,) in boards {
         delete_board_in(conn, board_id).await?;
     }
-    run_all(conn, &["DELETE FROM project_members WHERE project_id = ?", "DELETE FROM projects WHERE id = ?"], id).await
+    run_all(conn, &["DELETE FROM jira_settings WHERE project_id = ?", "DELETE FROM project_members WHERE project_id = ?", "DELETE FROM projects WHERE id = ?"], id).await
 }
 
 pub async fn delete_card(db: &Db, id: i64) -> Res<()> {
@@ -483,6 +497,9 @@ pub async fn delete_column(db: &Db, id: i64) -> Res<()> {
     run_all(
         &tx,
         &[
+            "DELETE FROM jira_links WHERE card_id IN (SELECT id FROM cards WHERE column_id = ?)",
+            "DELETE FROM jira_comments WHERE card_id IN (SELECT id FROM cards WHERE column_id = ?)",
+            "DELETE FROM jira_files WHERE card_id IN (SELECT id FROM cards WHERE column_id = ?)",
             "DELETE FROM card_labels WHERE card_id IN (SELECT id FROM cards WHERE column_id = ?)",
             "DELETE FROM card_assignees WHERE card_id IN (SELECT id FROM cards WHERE column_id = ?)",
             "DELETE FROM comments WHERE card_id IN (SELECT id FROM cards WHERE column_id = ?)",

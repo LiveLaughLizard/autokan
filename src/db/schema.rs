@@ -302,6 +302,49 @@ fn tables() -> Vec<Table> {
                 ],
             )
         },
+        // ---- Jira (see `jira`). A project's connection, and per-card links to issues. ----
+        Table {
+            primary_key: &["project_id"],
+            ..table(
+                "jira_settings",
+                vec![
+                    int("project_id").owned_by("projects"),
+                    text("base_url").default(""),
+                    key("auth").default("basic"), // 'basic' (user + token/password) | 'bearer' (personal access token)
+                    key("username").default(""),
+                    text("token").default(""),
+                    key("project_key").default(""),
+                    key("issue_type").default("Task"),
+                    text("ca_cert").default(""),
+                    int("enabled").default("0"),
+                    key("source").default("own"), // 'own' connection, or the organization's ('platform')
+                ],
+            )
+        },
+        // What was last sent is kept so unchanged cards cost no API calls. These tables refer to
+        // cards, comments and uploads by plain id (no foreign keys); `ops::delete_*` tidies them.
+        Table {
+            primary_key: &["card_id"],
+            ..table(
+                "jira_links",
+                vec![
+                    int("card_id"),
+                    key("issue_key"),
+                    text("pushed_summary").default(""),
+                    text("pushed_description").default(""),
+                    text("last_error").default(""),
+                    key("synced_at").null(),
+                ],
+            )
+        },
+        Table {
+            primary_key: &["comment_id"],
+            ..table("jira_comments", vec![int("comment_id"), int("card_id"), key("jira_comment_id"), text("pushed_body").default("")])
+        },
+        Table {
+            primary_key: &["card_id", "upload_id"],
+            ..table("jira_files", vec![int("card_id"), key("upload_id"), key("filename")])
+        },
     ]
 }
 

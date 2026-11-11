@@ -8,11 +8,60 @@ One binary; SQLite by default, or PostgreSQL, MySQL / MariaDB or SQL Server.
 
 ```sh
 nix-shell                 # or any environment with cargo, a C compiler, node, and (for SAML) libxml2 + xmlsec1
-cargo run --release
+just run                  # or: cargo run
 ```
 
 On first start the **break glass** account is created and its generated password is printed
 once to stderr. Sign in at <http://localhost:3000>, open **Admin**, and configure single sign-on.
+
+### Common tasks (`just`)
+
+`just` with no arguments lists every recipe. The ones used most:
+
+| | |
+|---|---|
+| `just run` / `just run-release` | run a development / optimized build |
+| `just debug` | run with request and debug logging and backtraces |
+| `just run-scratch` | run against a throwaway data directory (break glass password `breakglass-dev`) |
+| `just reset-breakglass` | print a new break glass password |
+| `just check` / `just lint` / `just verify` | type-check; clippy; both feature sets, clippy and the Helm chart |
+| `just css` / `just css-watch` | rebuild `static/app.css` |
+| `just mocks` / `just mock ldap` | start all, or one, of the mock services under `dev/` |
+| `just db-postgres` + `just run-postgres` | throwaway PostgreSQL in Docker, and run against it (also `-mysql`, `-mssql`; `just db-stop`) |
+| `just docker-build` / `just docker-run` | build / run the container image |
+| `just up` / `just logs` / `just down` | Docker Compose |
+| `just helm-lint` / `just helm-template` / `just helm-install` | the Helm chart |
+
+### Containers
+
+The `Dockerfile` builds a **distroless** image (Debian 12 `cc`, non-root, no shell): the binary,
+the C libraries SAML needs, and nothing else. Data lives in `/data`.
+
+```sh
+docker build -t autokan .
+docker run -p 3000:3000 -v autokan-data:/data --read-only --cap-drop ALL autokan
+```
+
+`compose.yaml` does the same with Docker Compose (`docker compose up -d --build`), with an optional
+bundled PostgreSQL (`--profile postgres`; see the comments in the file). Since the image has no
+shell, its health check is the binary itself (`autokan healthcheck`), and `GET /healthz` answers
+`ok` when the process is up and the database responds.
+
+### Kubernetes
+
+`charts/autokan` is a Helm chart for the same image:
+
+```sh
+helm upgrade --install autokan charts/autokan \
+  --set image.repository=registry.example.com/autokan --set image.tag=0.1.0 \
+  --set publicUrl=https://autokan.example.com \
+  --set ingress.enabled=true --set 'ingress.hosts[0].host=autokan.example.com'
+```
+
+It runs a single replica (uploads, and SQLite if used, live on one volume) as a non-root user
+with a read-only root filesystem, stores data on a PersistentVolumeClaim that is kept on
+uninstall, and probes `/healthz`. Set `database.url` (or `database.existingSecret`) to use
+PostgreSQL, MySQL or SQL Server. `values.yaml` documents every setting.
 
 | Variable | Default | |
 |---|---|---|
@@ -62,7 +111,7 @@ its dialect to the schema renderer.
 permissions. In *Admin → Roles & groups* you create roles (bundles of the permissions below)
 and map them to group names delivered by the identity provider.
 
-`platform.admin` · `admin.oidc` (all single sign-on settings) · `admin.rbac` · `admin.users` · `admin.agent` · `teams.create` · `teams.manage`
+`platform.admin` · `admin.oidc` (all single sign-on settings) · `admin.rbac` · `admin.users` · `admin.agent` · `admin.jira` · `teams.create` · `teams.manage`
 
 The Admin link only appears for the break glass account and for users holding an `admin.*` permission.
 
@@ -119,6 +168,32 @@ project** (Projects v2: the options of its single-select "Status" field are the 
 * Tokens: GitHub needs the `project` scope (and `repo` to edit real issues); GitLab needs `api`.
   For GitHub Enterprise Server or self-managed GitLab, give the server's address when linking.
 
+## Jira
+
+Jira works at the level of a single card rather than a whole board. The connection (Jira Cloud
+with an email and API token, or self-hosted Jira with a personal access token or username and
+password; a private CA can be pasted) can live in either of two places:
+
+* **For the whole organization** — *Admin → Jira* (`admin.jira`). A team admin then switches Jira
+  on for a project on the *project page → Jira* by choosing "The organization's Jira" and naming
+  the Jira project key; no credentials are handled at project level. Switching the organization's
+  connection off pauses Jira for every project that uses it.
+* **For one project** — on the same project page, choose "A connection just for this project"
+  and enter that project's own address and credentials.
+
+Then, in any card of a connected project:
+
+* **Create Jira issue** makes an issue in the configured Jira project. Its description starts
+  with a link back to the card, followed a couple of lines down by the card's description.
+* From then on the card's title, description, comments (new, edited and deleted) and attached
+  files are sent to that issue as they change. Images appear inline in Jira; videos and other
+  files become attachment links.
+* The card shows the issue's current status and a button for each workflow transition Jira
+  offers, so the issue can be moved through its stages from Autokan.
+
+Nothing is copied from Jira back into the card. If Jira is unreachable the card still saves; the
+card's Jira panel shows the failure and **Resend** sends everything again.
+
 ## Agent
 
 Each board has an agent console, and each column a **Send To Agent** button that sends the
@@ -141,6 +216,8 @@ Conversations are stored in a provider-neutral form, so a board's history carrie
 
 ## Development
 
+`just mocks` starts all of the following at once.
+
 ```sh
 npm install && npm run css      # rebuild static/app.css after changing classes in src/ or static/app.js
 node dev/mock-oidc.mjs          # OIDC provider on :9000 (issuer http://localhost:9000, client "autokan")
@@ -148,6 +225,7 @@ node dev/mock-ldap.mjs          # LDAP directory on :3893 with nested groups (se
 node dev/mock-saml.mjs          # SAML IdP on :9200 (metadata at /metadata; can also emit forged responses)
 node dev/mock-gitlab.mjs        # GitLab REST imitation on :9300 for the board sync (token glpat-test, project group/proj)
 node dev/mock-github.mjs        # GitHub GraphQL imitation on :9400 for the board sync (token ghp-test, owner my-org, project 1)
+node dev/mock-jira.mjs          # Jira REST imitation on :9500 (project ABC; see the file header for credentials)
 node dev/mock-llm.mjs           # scripted LLM on :9100 (OpenAI-compatible at /v1, Anthropic Messages at /)
 ```
 

@@ -1,0 +1,87 @@
+image:
+  # Where you pushed the image built from this repository's Dockerfile.
+  repository: ghcr.io/livelaughlizard/autokan
+  # Defaults to the chart's appVersion.
+  tag: ""
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+# The address people type in their browser. Used for OIDC / SAML callback URLs and for the links
+# placed in Jira issues, so set it to the real external URL.
+publicUrl: "http://localhost:3000"
+
+# Largest single upload, in megabytes. Raise your ingress' body-size limit to match.
+maxUploadMb: 200
+
+database:
+  # Empty = SQLite in the data volume. Otherwise a postgres://, mysql:// or mssql:// URL.
+  # The URL contains a password, so it is stored in a Secret.
+  url: ""
+  # Or take the URL from a Secret you manage (key: database-url). Takes precedence over `url`.
+  existingSecret: ""
+
+breakglass:
+  username: breakglass
+  # Empty = generated on first start and printed once in the pod log.
+  # Only read when the account is first created.
+  password: ""
+  # Or take the password from a Secret you manage (key: breakglass-password).
+  existingSecret: ""
+
+# Uploads always live here, and so does the database when SQLite is used.
+persistence:
+  enabled: true
+  size: 10Gi
+  storageClass: ""
+  accessModes: [ReadWriteOnce]
+  # Use a claim you created yourself instead of letting the chart create one.
+  existingClaim: ""
+
+service:
+  type: ClusterIP
+  port: 80
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+    # nginx.ingress.kubernetes.io/proxy-body-size: 200m
+  hosts:
+    - host: autokan.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+    # - secretName: autokan-tls
+    #   hosts: [autokan.example.com]
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+# Extra environment variables for the container, as a list of {name, value | valueFrom}.
+extraEnv: []
+
+resources: {}
+  # requests: { cpu: 100m, memory: 128Mi }
+  # limits: { memory: 512Mi }
+
+# The image is distroless and runs as its built-in non-root user (65532).
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: [ALL]
+
+podAnnotations: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}

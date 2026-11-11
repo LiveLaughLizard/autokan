@@ -21,6 +21,7 @@ pub const PERMISSIONS: &[(&str, &str)] = &[
     ("admin.rbac", "Admin panel: manage roles and group mappings"),
     ("admin.users", "Admin panel: view, enable and disable users"),
     ("admin.agent", "Admin panel: configure agent LLM services, API keys and defaults"),
+    ("admin.jira", "Admin panel: configure the organization's Jira connection"),
     ("teams.create", "Create teams"),
     ("teams.manage", "Manage every team (acts as team admin everywhere)"),
 ];

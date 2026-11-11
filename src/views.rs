@@ -272,10 +272,10 @@ pub fn editor(board_id: i64, name: &str, value: &str, placeholder: &str, rows: u
             textarea class="textarea w-full font-mono text-sm" name=(name) rows=(rows) placeholder=(placeholder) { (value) }
             div class="flex items-center gap-2" {
                 label class="btn btn-xs" {
-                    "Attach image / video"
-                    input type="file" class="hidden" accept="image/*,video/*" multiple;
+                    "Attach file"
+                    input type="file" class="hidden" multiple;
                 }
-                span class="text-xs opacity-60" data-upload-status { "Markdown. Paste or drop files to upload." }
+                span class="text-xs opacity-60" data-upload-status { "Markdown. Paste or drop images, videos or documents to upload." }
             }
         }
     }

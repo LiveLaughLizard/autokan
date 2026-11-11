@@ -221,6 +221,10 @@ pub async fn sync_board(state: &AppState, board_id: i64) -> Result<Summary, Stri
     if !error.is_empty() {
         tracing::warn!("sync of board {board_id} failed: {error}");
     }
+    // Cards changed by the remote side may have Jira issues that need the new text.
+    if result.as_ref().is_ok_and(|s| s.pulled > 0) {
+        crate::jira::push_board_soon(state, board_id);
+    }
     let _ = query("UPDATE board_sync SET last_sync = ?, last_error = ? WHERE board_id = ?")
         .bind(now())
         .bind(error.chars().take(2000).collect::<String>())

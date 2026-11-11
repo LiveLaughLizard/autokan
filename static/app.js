@@ -85,6 +85,13 @@
     modal.addEventListener("close", () => ($("#modal-body").innerHTML = ""));
   }
 
+  // A link such as /boards/3?card=17 (used in Jira issues) opens that card straight away.
+  const linkedCard = new URLSearchParams(location.search).get("card");
+  if (modal && /^\d+$/.test(linkedCard || "")) {
+    htmx.ajax("GET", `/cards/${linkedCard}`, { target: "#modal-body", swap: "innerHTML" });
+    history.replaceState(null, "", location.pathname);
+  }
+
   // ---- board drag and drop ---------------------------------------------------------------
 
   let refocusColumn = null;
@@ -159,8 +166,8 @@
   document.body.addEventListener("htmx:afterSwap", (e) => {
     const id = e.detail.target.id;
     if (id === "board") initBoard();
+    localTimes(e.detail.target); // any swapped fragment may carry timestamps
     if (id === "modal-body") {
-      localTimes(e.detail.target);
       if (modal && !modal.open && e.detail.target.innerHTML.trim()) modal.showModal();
     }
     if (id === "agent-messages") scrollAgent();

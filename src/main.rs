@@ -3,6 +3,7 @@ mod auth;
 mod db;
 mod error;
 mod handlers;
+mod jira;
 mod ldap;
 mod llm;
 mod markdown;
@@ -46,6 +47,8 @@ pub struct AppState {
     pub ldap_throttle: Arc<Mutex<auth::KeyedThrottle>>,
     /// Asks the background worker to sync a board with GitHub / GitLab soon.
     pub sync: sync::SyncHandle,
+    /// Serializes updates to Jira so the same comment is never posted twice.
+    pub jira_lock: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl AppState {
@@ -56,6 +59,10 @@ impl AppState {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    if matches!(std::env::args().nth(1).as_deref(), Some("--version" | "-V")) {
+        println!("autokan {}", env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "autokan=info,tower_http=warn".into()),
@@ -63,6 +70,18 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let cfg = Config::from_env();
+
+    // `autokan healthcheck`: for container health checks, where the image has no shell or curl.
+    if std::env::args().nth(1).as_deref() == Some("healthcheck") {
+        let port = cfg.bind.rsplit(':').next().unwrap_or("3000");
+        let ok = reqwest::Client::new()
+            .get(format!("http://127.0.0.1:{port}/healthz"))
+            .timeout(std::time::Duration::from_secs(5))
+            .send()
+            .await
+            .is_ok_and(|r| r.status().is_success());
+        std::process::exit(if ok { 0 } else { 1 });
+    }
     std::fs::create_dir_all(cfg.data_dir.join("uploads"))?;
     // SQLite in the data directory unless AUTOKAN_DATABASE_URL names another backend.
     let database_url = std::env::var("AUTOKAN_DATABASE_URL")
@@ -86,6 +105,7 @@ async fn main() -> anyhow::Result<()> {
     let (sync_handle, sync_requests) = sync::channel();
     let state = AppState {
         sync: sync_handle,
+        jira_lock: Default::default(),
         db,
         http: reqwest::Client::builder()
             .connect_timeout(std::time::Duration::from_secs(15))

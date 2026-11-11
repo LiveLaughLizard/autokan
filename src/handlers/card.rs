@@ -115,6 +115,9 @@ async fn render(state: &AppState, user: &User, card_id: i64) -> Res<Markup> {
                 }
             }
 
+            // Filled in after the modal opens; empty when the project has no Jira connection.
+            div id="jira-panel" hx-get={ (base) "/jira" } hx-trigger="load" hx-target="this" hx-swap="innerHTML" {}
+
             section class="flex flex-col gap-2" data-toggle-scope {
                 div class="flex items-center gap-2" {
                     div class=(heading) { "Description" }
@@ -211,6 +214,7 @@ pub async fn update(State(state): State<AppState>, user: User, Path(id): Path<i6
     require(access.can_edit_card(card.created_by, user.id))?;
     ops::update_card(&state.db, id, f.title.as_deref(), f.description.as_deref()).await?;
     state.sync.poke(card.board_id);
+    crate::jira::push_soon(&state, id);
     rerender(&state, &user, id).await
 }
 
@@ -259,6 +263,7 @@ pub async fn add_comment(State(state): State<AppState>, user: User, Path(id): Pa
     let (card, access) = ctx(&state, &user, id).await?;
     require(access.comment)?;
     ops::add_comment(&state.db, card.id, user.id, &f.body).await?;
+    crate::jira::push_soon(&state, card.id);
     rerender(&state, &user, id).await
 }
 
@@ -284,6 +289,7 @@ pub async fn edit_comment(State(state): State<AppState>, user: User, Path(id): P
         .bind(id)
         .execute(&state.db)
         .await?;
+    crate::jira::push_soon(&state, card_id);
     rerender(&state, &user, card_id).await
 }
 
@@ -292,5 +298,6 @@ pub async fn delete_comment(State(state): State<AppState>, user: User, Path(id):
     let (_, access) = ctx(&state, &user, card_id).await?;
     require(access.manage || (author == Some(user.id) && access.participant()))?;
     query("DELETE FROM comments WHERE id = ?").bind(id).execute(&state.db).await?;
+    crate::jira::push_soon(&state, card_id);
     rerender(&state, &user, card_id).await
 }

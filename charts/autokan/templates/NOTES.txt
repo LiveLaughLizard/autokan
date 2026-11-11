@@ -1,0 +1,21 @@
+Autokan is starting. Public URL: {{ .Values.publicUrl }}
+
+{{- if not (or .Values.breakglass.password .Values.breakglass.existingSecret) }}
+
+The break glass password was generated on first start and printed once. Read it with:
+
+  kubectl logs --namespace {{ .Release.Namespace }} deploy/{{ include "autokan.fullname" . }} | grep -A4 "BREAK GLASS"
+
+If it has scrolled away, set a new one:
+
+  kubectl exec --namespace {{ .Release.Namespace }} deploy/{{ include "autokan.fullname" . }} -- /usr/local/bin/autokan reset-breakglass
+{{- end }}
+
+{{- if not .Values.ingress.enabled }}
+
+To reach it without an ingress:
+
+  kubectl port-forward --namespace {{ .Release.Namespace }} svc/{{ include "autokan.fullname" . }} 3000:{{ .Values.service.port }}
+{{- end }}
+
+Sign in as "{{ .Values.breakglass.username }}", then set up single sign-on under Admin.

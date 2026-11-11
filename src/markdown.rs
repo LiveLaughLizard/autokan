@@ -5,6 +5,8 @@ use std::sync::LazyLock;
 
 pub const IMAGE_EXTS: &[&str] = &["png", "jpg", "jpeg", "gif", "webp", "avif"];
 pub const VIDEO_EXTS: &[&str] = &["mp4", "webm", "mov", "m4v", "ogv"];
+/// Other attachments: stored and linked, always served as downloads.
+pub const FILE_EXTS: &[&str] = &["pdf", "txt", "log", "md", "csv", "json", "xml", "zip", "gz", "docx", "xlsx", "pptx", "odt", "ods"];
 
 static SANITIZER: LazyLock<ammonia::Builder<'static>> = LazyLock::new(|| {
     let mut b = ammonia::Builder::default();

@@ -2,6 +2,7 @@ mod admin;
 mod agent;
 mod board;
 mod card;
+mod jira;
 mod org;
 mod upload;
 
@@ -27,6 +28,7 @@ pub fn router(state: AppState) -> Router {
         .layer(DefaultBodyLimit::max(state.cfg.max_upload_bytes));
 
     Router::new()
+        .route("/healthz", get(healthz))
         .route("/static/{name}", get(crate::views::serve_asset))
         // auth
         .route("/login", get(login_page).post(login))
@@ -76,6 +78,14 @@ pub fn router(state: AppState) -> Router {
         .route("/cards/{id}/comments", post(card::add_comment))
         .route("/comments/{id}", post(card::edit_comment))
         .route("/comments/{id}/delete", post(card::delete_comment))
+        // jira
+        .route("/admin/jira", post(jira::save_platform))
+        .route("/projects/{id}/jira", post(jira::save_settings))
+        .route("/cards/{id}/jira", get(jira::panel_fragment))
+        .route("/cards/{id}/jira/create", post(jira::create))
+        .route("/cards/{id}/jira/transition", post(jira::transition))
+        .route("/cards/{id}/jira/resync", post(jira::resync))
+        .route("/cards/{id}/jira/unlink", post(jira::unlink))
         // media
         .merge(uploads)
         .route("/uploads/{id}", get(upload::serve))
@@ -104,6 +114,17 @@ pub fn router(state: AppState) -> Router {
         .route("/projects/{id}/agent", post(org::set_project_agent))
         .route("/admin/password", post(admin::change_password))
         .with_state(state)
+}
+
+/// Liveness / readiness: the process is up and the database answers. Needs no sign-in.
+async fn healthz(State(state): State<AppState>) -> Response {
+    match query_as::<(i64,)>("SELECT 1").fetch_one(&state.db).await {
+        Ok(_) => "ok".into_response(),
+        Err(e) => {
+            tracing::error!("health check failed: {e:#}");
+            (axum::http::StatusCode::SERVICE_UNAVAILABLE, "database unavailable").into_response()
+        }
+    }
 }
 
 /// Header that makes the open board re-fetch its columns.

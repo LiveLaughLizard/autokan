@@ -79,9 +79,11 @@ fn stream(state: AppState, user: User, board_id: i64, content: String, display: 
     let (tx, rx) = tokio::sync::mpsc::channel::<Value>(64);
     tokio::spawn(async move {
         let sync = state.sync.clone();
+        let jira_state = state.clone();
         agent::run(state, user, board_id, content, display, column, tx).await;
         // The agent may have changed the board; pass that on to a linked GitHub / GitLab board.
         sync.poke(board_id);
+        crate::jira::push_board_soon(&jira_state, board_id);
     });
     let events: std::pin::Pin<Box<dyn Stream<Item = Result<Event, Infallible>> + Send>> =
         Box::pin(ReceiverStream::new(rx).map(|v| Ok(Event::default().data(v.to_string()))));

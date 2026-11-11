@@ -1,0 +1,6 @@
+apiVersion: v2
+name: autokan
+description: Self-hosted kanban with single sign-on, RBAC, board agents and GitHub / GitLab / Jira integration
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

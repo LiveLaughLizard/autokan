@@ -41,6 +41,9 @@ fn card_tile(data: &BoardData, card: &Card, access: &Access, user: &User) -> Mar
                     div class="flex flex-wrap gap-1" { @for l in labels { (label_badge(l)) } }
                 }
                 div class="text-sm break-words" { (card.title) }
+                @if let Some(key) = data.jira.get(&card.id) {
+                    div { span class="badge badge-sm badge-soft badge-info font-mono" title="Linked Jira issue" { (key) } }
+                }
                 @if !card.description.is_empty() || card.comment_count > 0 || assignees.is_some() {
                     div class="flex items-center gap-2 text-xs opacity-70" {
                         @if !card.description.is_empty() { span title="Has a description" { "≡" } }

@@ -1,0 +1,54 @@
+# Autokan with Docker Compose.
+#
+#   docker compose up -d --build                      # SQLite, stored in the "autokan-data" volume
+#   docker compose --profile postgres up -d --build   # the same, plus a PostgreSQL server
+#
+# The break glass password is printed once in the logs on first start:
+#   docker compose logs autokan
+# Or set AUTOKAN_BREAKGLASS_PASSWORD (for example in a .env file next to this one) before the first start.
+#
+# To use the bundled PostgreSQL, start with the "postgres" profile and set in .env:
+#   AUTOKAN_DATABASE_URL=postgres://autokan:autokan@postgres/autokan
+# (change the password in both places for anything beyond a trial).
+
+services:
+  autokan:
+    build: .
+    image: autokan:latest
+    restart: unless-stopped
+    ports:
+      - "${AUTOKAN_PORT:-3000}:3000"
+    environment:
+      # The address people type in their browser; used for OIDC / SAML callbacks and Jira links.
+      AUTOKAN_PUBLIC_URL: ${AUTOKAN_PUBLIC_URL:-http://localhost:3000}
+      # Empty = SQLite in the data volume.
+      AUTOKAN_DATABASE_URL: ${AUTOKAN_DATABASE_URL:-}
+      AUTOKAN_BREAKGLASS_PASSWORD: ${AUTOKAN_BREAKGLASS_PASSWORD:-}
+      AUTOKAN_MAX_UPLOAD_MB: ${AUTOKAN_MAX_UPLOAD_MB:-200}
+    volumes:
+      - autokan-data:/data
+    # The image is distroless (no shell), so run with as little as it needs.
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+
+  postgres:
+    profiles: [postgres]
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: autokan
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-autokan}
+      POSTGRES_DB: autokan
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U autokan"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  autokan-data:
+  postgres-data:

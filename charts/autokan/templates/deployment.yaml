@@ -1,0 +1,117 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "autokan.fullname" . }}
+  labels:
+    {{- include "autokan.labels" . | nindent 4 }}
+spec:
+  # One replica only: uploads (and the default SQLite database) live on a single volume, and
+  # sign-in throttling and the GitHub / GitLab sync worker are per process.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "autokan.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "autokan.selectorLabels" . | nindent 8 }}
+      annotations:
+        # Restart the pod when the chart-managed Secret changes.
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "autokan.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: autokan
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: 3000
+              protocol: TCP
+          env:
+            - name: AUTOKAN_BIND
+              value: "0.0.0.0:3000"
+            - name: AUTOKAN_DATA_DIR
+              value: /data
+            - name: AUTOKAN_PUBLIC_URL
+              value: {{ .Values.publicUrl | quote }}
+            - name: AUTOKAN_MAX_UPLOAD_MB
+              value: {{ .Values.maxUploadMb | quote }}
+            - name: AUTOKAN_BREAKGLASS_USER
+              value: {{ .Values.breakglass.username | quote }}
+            {{- if or .Values.database.existingSecret .Values.database.url }}
+            - name: AUTOKAN_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.database.existingSecret | default (include "autokan.secretName" .) }}
+                  key: database-url
+            {{- end }}
+            {{- if or .Values.breakglass.existingSecret .Values.breakglass.password }}
+            - name: AUTOKAN_BREAKGLASS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.breakglass.existingSecret | default (include "autokan.secretName" .) }}
+                  key: breakglass-password
+            {{- end }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 3
+            failureThreshold: 40
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 20
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          {{- if .Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.persistence.existingClaim | default (printf "%s-data" (include "autokan.fullname" .)) }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

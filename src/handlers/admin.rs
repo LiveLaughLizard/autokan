@@ -33,6 +33,9 @@ fn tabs(user: &User) -> Vec<(&'static str, &'static str)> {
     if user.has("admin.agent") {
         t.push(("agent", "Agent services"));
     }
+    if user.has("admin.jira") {
+        t.push(("jira", "Jira"));
+    }
     if user.is_breakglass() {
         t.push(("account", "Break glass account"));
     }
@@ -64,6 +67,7 @@ pub async fn page_handler(State(state): State<AppState>, user: User, Query(q): Q
         "rbac" => rbac_tab(&state).await?,
         "users" => users_tab(&state).await?,
         "agent" => agent_tab(&state).await?,
+        "jira" => super::jira::platform_panel(&state).await,
         _ => account_tab(),
     };
     Ok(page(

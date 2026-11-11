@@ -353,8 +353,14 @@ const PROJECT_PERMS: &[(&str, &str, &str)] = &[
     ("edit_all", "Edit all cards", "Edit, move and delete any card"),
 ];
 
-pub async fn project_page(State(state): State<AppState>, user: User, Path(id): Path<i64>) -> Res<Markup> {
+pub async fn project_page(
+    State(state): State<AppState>,
+    user: User,
+    Path(id): Path<i64>,
+    axum::extract::Query(q): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> Res<Markup> {
     let access = project_access(&state.db, &user, id).await?;
+    let jira_panel = super::jira::settings_panel(&state, id, access.team_admin).await?;
     let (agent_service_id, agent_model): (Option<i64>, String) = query_as("SELECT agent_service_id, agent_model FROM projects WHERE id = ?")
         .bind(id)
         .fetch_one(&state.db)
@@ -454,6 +460,11 @@ pub async fn project_page(State(state): State<AppState>, user: User, Path(id): P
                     }
                 }
             }))
+            div id="jira" class="scroll-mt-20 flex flex-col gap-2" {
+                @if let Some(m) = q.get("jira_msg") { div role="alert" class="alert alert-success text-sm" { (m) } }
+                @if let Some(m) = q.get("jira_error") { div role="alert" class="alert alert-error text-sm" { (m) } }
+                (jira_panel)
+            }
             (panel("Members & permissions", html! {
                 div class="overflow-x-auto" {
                     table class="table table-sm" {
