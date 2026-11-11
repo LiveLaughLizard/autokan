@@ -1,0 +1,19 @@
+{
+  "name": "autokan-assets",
+  "private": true,
+  "scripts": {
+    "css": "tailwindcss -i assets/input.css -o static/app.css --minify",
+    "css:watch": "tailwindcss -i assets/input.css -o static/app.css --watch"
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "^4",
+    "@tailwindcss/typography": "^0.5",
+    "daisyui": "^5",
+    "htmx.org": "^2",
+    "ldapjs": "^3.0.7",
+    "selfsigned": "^5.5.0",
+    "sortablejs": "^1.15",
+    "tailwindcss": "^4",
+    "xml-crypto": "^6.4.0"
+  }
+}

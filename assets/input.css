@@ -1,0 +1,148 @@
+@import "tailwindcss" source(none);
+@source "../src";
+@source "../static/app.js";
+
+@plugin "@tailwindcss/typography";
+@plugin "daisyui" {
+  themes: all;
+}
+
+/* Uploaded media inside rendered Markdown */
+.prose img,
+.prose video {
+  max-width: 100%;
+  max-height: 28rem;
+  border-radius: 0.5rem;
+  margin-block: 0.5rem;
+}
+
+/* Agent replies sit in a narrow column */
+.chat-bubble .prose {
+  font-size: 0.875rem;
+}
+.chat-bubble .prose > :first-child {
+  margin-top: 0;
+}
+.chat-bubble .prose > :last-child {
+  margin-bottom: 0;
+}
+
+/* Drag and drop placeholders (SortableJS) */
+.sortable-ghost {
+  opacity: 0.35;
+}
+.sortable-drag {
+  cursor: grabbing;
+}
+
+/* ---- Look and feel ------------------------------------------------------------------- */
+
+/* Soft glows in the theme's own colours behind every page */
+.app-bg {
+  background-image:
+    radial-gradient(60rem 30rem at 0% 0%, color-mix(in oklab, var(--color-primary) 14%, transparent), transparent 70%),
+    radial-gradient(50rem 28rem at 100% 0%, color-mix(in oklab, var(--color-secondary) 12%, transparent), transparent 70%),
+    radial-gradient(50rem 30rem at 50% 110%, color-mix(in oklab, var(--color-accent) 10%, transparent), transparent 70%);
+  background-attachment: fixed;
+}
+
+/* Logo: gear in the primary colour, bolt in the warning colour, outlined so it reads as passing through */
+.logo-bolt {
+  fill: var(--color-warning);
+  stroke: var(--color-base-100);
+}
+.logo {
+  filter: drop-shadow(0 1px 2px color-mix(in oklab, var(--color-primary) 40%, transparent));
+}
+.brand:hover .logo {
+  animation: logo-spin 0.9s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+@keyframes logo-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.brand-text,
+.gradient-text {
+  background-image: linear-gradient(90deg, var(--color-primary), var(--color-secondary));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* Tiles and cards lift on hover */
+.lift {
+  transition:
+    transform 0.15s ease,
+    box-shadow 0.15s ease,
+    border-color 0.15s ease;
+}
+.lift:hover {
+  transform: translateY(-2px);
+  border-color: color-mix(in oklab, var(--color-primary) 55%, transparent);
+  box-shadow: 0 10px 24px -12px color-mix(in oklab, var(--color-primary) 55%, transparent);
+}
+
+/* Accent stripe across the top of feature cards */
+.stripe {
+  position: relative;
+  overflow: hidden;
+}
+.stripe::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 3px;
+  background-image: linear-gradient(90deg, var(--color-primary), var(--color-secondary), var(--color-accent));
+}
+
+/* Primary call-to-action with a gradient sheen */
+.btn-glow {
+  background-image: linear-gradient(135deg, var(--color-primary), var(--color-secondary));
+  color: var(--color-primary-content);
+  border-color: transparent;
+  box-shadow: 0 6px 18px -8px var(--color-primary);
+}
+.btn-glow:hover {
+  filter: brightness(1.08);
+}
+
+/* Content eases in */
+main > * {
+  animation: rise 0.25s ease both;
+}
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+/* Slim scrollbars inside the board */
+#board,
+.card-list,
+#agent-messages {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in oklab, var(--color-base-content) 25%, transparent) transparent;
+}
+
+/* The board's empty space can be dragged to scroll horizontally */
+#board {
+  cursor: grab;
+}
+#board.panning {
+  cursor: grabbing;
+  user-select: none;
+}
+#board .column,
+#board form {
+  cursor: auto;
+}
