@@ -173,6 +173,13 @@ pub async fn board_page(State(state): State<AppState>, user: User, Path(id): Pat
                         }
                     }
                 }
+                @if access.participant() {
+                    // One tab per "Send To Agent" run, added by app.js; a tab opens that run's console.
+                    div id="agent-dock" class="hidden shrink-0 border-t border-base-300 bg-base-100/90 backdrop-blur" {
+                        div id="agent-dock-console" class="hidden h-64 overflow-y-auto p-3 font-mono text-xs border-b border-base-300" {}
+                        div id="agent-dock-tabs" class="flex items-center gap-1 px-2 py-1 overflow-x-auto" {}
+                    }
+                }
             }
             dialog id="modal" class="modal" {
                 div class="modal-box max-w-3xl" { div id="modal-body" {} }

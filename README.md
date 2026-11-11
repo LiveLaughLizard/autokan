@@ -111,7 +111,7 @@ its dialect to the schema renderer.
 permissions. In *Admin → Roles & groups* you create roles (bundles of the permissions below)
 and map them to group names delivered by the identity provider.
 
-`platform.admin` · `admin.oidc` (all single sign-on settings) · `admin.rbac` · `admin.users` · `admin.agent` · `admin.jira` · `teams.create` · `teams.manage`
+`platform.admin` · `admin.oidc` (all single sign-on settings) · `admin.rbac` · `admin.users` · `admin.agent` · `admin.jira` · `teams.create` · `teams.manage` · `api.keys` (create and use personal API keys)
 
 The Admin link only appears for the break glass account and for users holding an `admin.*` permission.
 
@@ -200,6 +200,12 @@ Each board has an agent console, and each column a **Send To Agent** button that
 column's cards with a saved prompt. The agent's tools are scoped to the open board and run with
 the permissions of the user who is chatting.
 
+**Send To Agent** adds a tab at the bottom of the board. Clicking it opens a console that streams
+what the agent is doing with the column: the model in use, each tool call and whether it worked,
+and the agent's own messages. The ✕ on a tab stops a run in progress (changes already made are
+kept) or closes a finished one. Tabs live in the page, so reloading the board ends a run. A run
+keeps going until the model stops calling tools; there is no step limit.
+
 **Services** are configured once, under *Admin → Agent services* (`admin.agent`): a name, a
 provider, an API key and the list of model ids to offer.
 
@@ -213,6 +219,55 @@ provider, an API key and the list of model ids to offer.
 **Which model runs** is resolved per request: the column's override (Send To Agent only) →
 the project's default (*project page → Agent*) → the platform default (*Admin → Agent services*).
 Conversations are stored in a provider-neutral form, so a board's history carries across services.
+
+## API keys, JSON API and MCP server
+
+Users holding the `api.keys` permission can create personal keys under *user menu → API keys*.
+A key acts as its owner, with exactly that user's team and project permissions, checked on every
+call. It is shown once and stored as a hash; it stops working when it expires or is revoked, when
+the account is disabled, or when the owner no longer holds `api.keys`. Keys reach the two
+interfaces below and nothing else (no admin pages, no session).
+
+Both interfaces offer the board agent's tools: `get_board`, `get_card`, `create_card`,
+`update_card`, `move_card`, `delete_card`, `add_comment`, `set_card_label`,
+`set_card_assignee`, `create_column`, `update_column`, `delete_column`, `create_label`.
+
+**JSON API** — send `Authorization: Bearer <key>`.
+
+| | |
+|---|---|
+| `GET /api/v1/boards` | boards you can work on |
+| `GET /api/v1/boards/{id}` | columns, cards, labels and members |
+| `GET /api/v1/tools` | the tools and their arguments (JSON Schema) |
+| `POST /api/v1/boards/{id}/tools/{tool}` | run a tool; the body is its arguments as a JSON object |
+
+```sh
+curl -H "Authorization: Bearer $AUTOKAN_API_KEY" -d '{"card_id": 7, "column_id": 3}' \
+     https://autokan.example.com/api/v1/boards/1/tools/move_card
+```
+
+Errors are `{"error": "..."}` with a 400, 401, 403 or 404 status.
+
+**MCP server** — `POST /mcp` (Streamable HTTP, stateless, tools only) with the same header. The
+tools take an extra `board_id`, and `list_boards` finds one.
+
+```sh
+claude mcp add --transport http autokan https://autokan.example.com/mcp \
+  --header "Authorization: Bearer $AUTOKAN_API_KEY"
+```
+
+**opencode** — copy `integrations/opencode/autokan.ts` to `.opencode/plugins/` (or
+`~/.config/opencode/plugins/`) and set `AUTOKAN_URL` and `AUTOKAN_API_KEY`; the plugin connects
+opencode to the MCP server. Without the plugin, the same thing in `opencode.jsonc`:
+
+```jsonc
+{ "mcp": { "servers": { "autokan": {
+  "type": "remote", "url": "https://autokan.example.com/mcp", "oauth": false,
+  "headers": { "Authorization": "Bearer {env:AUTOKAN_API_KEY}" }
+} } } }
+```
+
+An open board does not notice changes made through a key until it is next refreshed.
 
 ## Development
 

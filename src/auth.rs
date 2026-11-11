@@ -24,6 +24,7 @@ pub const PERMISSIONS: &[(&str, &str)] = &[
     ("admin.jira", "Admin panel: configure the organization's Jira connection"),
     ("teams.create", "Create teams"),
     ("teams.manage", "Manage every team (acts as team admin everywhere)"),
+    ("api.keys", "Create and use personal API keys (JSON API and MCP server)"),
 ];
 
 #[derive(Clone, Debug)]
@@ -176,6 +177,11 @@ async fn load_user(db: &Db, token: &str) -> anyhow::Result<Option<User>> {
     .fetch_optional(db)
     .await?;
     let Some((id, kind, username, display_name)) = row else { return Ok(None) };
+    Ok(Some(User { id, kind, username, display_name, perms: load_perms(db, id).await? }))
+}
+
+/// Platform permissions from the roles mapped to the user's groups.
+async fn load_perms(db: &Db, id: i64) -> anyhow::Result<HashSet<String>> {
     let rows: Vec<(String,)> = query_as(
         "SELECT r.permissions FROM user_groups g JOIN group_mappings m ON m.group_name = g.group_name \
          JOIN roles r ON r.id = m.role_id WHERE g.user_id = ?",
@@ -187,7 +193,88 @@ async fn load_user(db: &Db, token: &str) -> anyhow::Result<Option<User>> {
     for (json,) in rows {
         perms.extend(serde_json::from_str::<Vec<String>>(&json).unwrap_or_default());
     }
-    Ok(Some(User { id, kind, username, display_name, perms }))
+    Ok(perms)
+}
+
+// ---- API keys --------------------------------------------------------------------------------
+
+/// Create a personal API key and return it. This is the only time the key itself is available:
+/// the database keeps a hash.
+pub async fn create_api_key(db: &Db, user_id: i64, name: &str, expires_at: Option<i64>) -> anyhow::Result<String> {
+    let token = format!("ak_{}", random_token(24));
+    query("INSERT INTO api_keys (user_id, name, token_hash, prefix, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)")
+        .bind(user_id)
+        .bind(name)
+        .bind(hash_token(&token))
+        .bind(&token[..11])
+        .bind(crate::db::now())
+        .bind(expires_at)
+        .execute(db)
+        .await?;
+    Ok(token)
+}
+
+/// The owner of a live key, provided the account is enabled and still holds `api.keys`.
+async fn load_api_user(db: &Db, token: &str) -> anyhow::Result<Result<User, &'static str>> {
+    let row: Option<(i64, Option<String>, i64, String, String, String)> = query_as(
+        "SELECT k.id, k.last_used, u.id, u.kind, u.username, u.display_name FROM api_keys k JOIN users u ON u.id = k.user_id \
+         WHERE k.token_hash = ? AND u.disabled = 0 AND (k.expires_at IS NULL OR k.expires_at > ?)",
+    )
+    .bind(hash_token(token))
+    .bind(crate::db::epoch())
+    .fetch_optional(db)
+    .await?;
+    let Some((key_id, last_used, id, kind, username, display_name)) = row else {
+        return Ok(Err("Invalid, expired or revoked API key"));
+    };
+    let user = User { id, kind, username, display_name, perms: load_perms(db, id).await? };
+    if !user.has("api.keys") {
+        return Ok(Err("This account is not permitted to use API keys"));
+    }
+    // "Last used" is shown to the minute, so one write a minute is enough.
+    let now = crate::db::now();
+    if last_used.as_deref().map(|t| &t[..t.len().min(16)]) != Some(&now[..16]) {
+        query("UPDATE api_keys SET last_used = ? WHERE id = ?").bind(&now).bind(key_id).execute(db).await?;
+    }
+    Ok(Ok(user))
+}
+
+/// A caller outside the app, identified by `Authorization: Bearer <API key>`. It acts as the
+/// key's owner, with exactly that user's permissions. Session cookies are deliberately not
+/// accepted here, which is what lets these routes skip `origin_guard`.
+pub struct ApiUser(pub User);
+
+impl FromRequestParts<AppState> for ApiUser {
+    type Rejection = Response;
+
+    async fn from_request_parts(parts: &mut Parts, state: &AppState) -> Result<Self, Response> {
+        let deny = |status: StatusCode, message: &str| {
+            (
+                status,
+                [(header::WWW_AUTHENTICATE, "Bearer"), (header::CONTENT_TYPE, "application/json")],
+                serde_json::json!({ "error": message }).to_string(),
+            )
+                .into_response()
+        };
+        let token = parts
+            .headers
+            .get(header::AUTHORIZATION)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.strip_prefix("Bearer ").or_else(|| v.strip_prefix("bearer ")))
+            .map(str::trim)
+            .filter(|t| !t.is_empty());
+        let Some(token) = token else {
+            return Err(deny(StatusCode::UNAUTHORIZED, "Send an API key as 'Authorization: Bearer <key>'"));
+        };
+        match load_api_user(&state.db, token).await {
+            Ok(Ok(user)) => Ok(ApiUser(user)),
+            Ok(Err(message)) => Err(deny(StatusCode::UNAUTHORIZED, message)),
+            Err(e) => {
+                tracing::error!("API key lookup failed: {e:#}");
+                Err(deny(StatusCode::INTERNAL_SERVER_ERROR, "Internal error"))
+            }
+        }
+    }
 }
 
 impl FromRequestParts<AppState> for User {
@@ -217,7 +304,10 @@ impl FromRequestParts<AppState> for User {
 pub async fn origin_guard(State(state): State<AppState>, req: Request, next: Next) -> Response {
     // The SAML assertion consumer service is, by design, a cross-site POST from the identity
     // provider; it authenticates the request itself (signed response answering a request we issued).
-    let exempt = req.uri().path() == "/auth/saml/acs";
+    // The API and MCP routes take an API key and never a cookie, so there is nothing for another
+    // site to ride on.
+    let path = req.uri().path();
+    let exempt = path == "/auth/saml/acs" || path == "/mcp" || path.starts_with("/api/");
     if !exempt && !matches!(*req.method(), Method::GET | Method::HEAD | Method::OPTIONS) {
         if let Some(origin) = req.headers().get(header::ORIGIN).and_then(|v| v.to_str().ok()) {
             let host = req.headers().get(header::HOST).and_then(|v| v.to_str().ok()).unwrap_or("");

@@ -30,7 +30,7 @@ pub async fn history(State(state): State<AppState>, user: User, Path(board_id): 
                     li { "“Move everything in Human Review that I approved in the comments to Done.”" }
                     li { "“Add a Blocked column after In Progress.”" }
                 }
-                p { "Each column's “Send To Agent” button sends that column's cards with its saved prompt." }
+                p { "Each column's “Send To Agent” button sends that column's cards with its saved prompt, and shows its progress in a tab at the bottom of the board." }
             }
         }
         @for m in &messages {

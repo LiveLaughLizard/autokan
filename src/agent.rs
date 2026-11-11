@@ -11,7 +11,6 @@ use crate::AppState;
 use serde_json::{json, Value};
 use tokio::sync::mpsc::Sender;
 
-const MAX_STEPS: usize = 20;
 const MAX_HISTORY: usize = 80;
 
 fn truncate(s: &str, max: usize) -> String {
@@ -111,7 +110,8 @@ fn tool(name: &str, description: &str, properties: Value, required: &[&str]) -> 
     })
 }
 
-fn tools() -> Vec<Value> {
+/// Tool definitions in the OpenAI function-calling shape. Also offered by the API and MCP server.
+pub fn tools() -> Vec<Value> {
     let int = |d: &str| json!({ "type": "integer", "description": d });
     let st = |d: &str| json!({ "type": "string", "description": d });
     let bo = |d: &str| json!({ "type": "boolean", "description": d });
@@ -207,7 +207,12 @@ async fn column_on_board(db: &Db, board_id: i64, args: &Value) -> Res<Column> {
     Ok(col)
 }
 
-async fn exec_tool(db: &Db, user: &User, board_id: i64, name: &str, args: &Value) -> Res<Value> {
+/// Whether a tool only reads the board.
+pub fn read_only(name: &str) -> bool {
+    name.starts_with("get_")
+}
+
+pub async fn exec_tool(db: &Db, user: &User, board_id: i64, name: &str, args: &Value) -> Res<Value> {
     // Re-evaluated on every call so revoked permissions take effect immediately.
     let access = board_access(db, user, board_id).await?;
     require(access.participant())?;
@@ -464,7 +469,9 @@ async fn run_inner(
     // only ever appends.
     let mut session = Session::new(target, system, tools(), &messages);
 
-    for _ in 0..MAX_STEPS {
+    // No step cap: the turn runs until the model replies without tool calls, a model call fails,
+    // or the browser disconnects.
+    loop {
         let reply = session.step(&state.http, tx).await?;
         let mut assistant = json!({ "role": "assistant", "content": reply.content, "model": label });
         if reply.tool_calls.is_empty() {
@@ -506,12 +513,13 @@ async fn run_inner(
             // A disconnected browser is noticed on the next model call.
             persist(db, board_id, user.id, &json!({ "role": "tool", "tool_call_id": call.id, "content": text })).await?;
             results.push((call.id.clone(), text));
-            let _ = tx.send(json!({ "type": "tool", "name": call.name, "arguments": call.arguments, "ok": !failed })).await;
-            if !failed && !call.name.starts_with("get_") {
+            let _ = tx
+                .send(json!({ "type": "tool", "name": call.name, "arguments": call.arguments, "ok": !failed, "error": result["error"] }))
+                .await;
+            if !failed && !read_only(&call.name) {
                 let _ = tx.send(json!({ "type": "refresh" })).await;
             }
         }
         session.tool_results(&results);
     }
-    Err(format!("Stopped after {MAX_STEPS} agent steps without finishing."))
 }

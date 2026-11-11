@@ -114,6 +114,23 @@ fn tables() -> Vec<Table> {
             primary_key: &["token_hash"],
             ..table("sessions", vec![key("token_hash"), int("user_id").owned_by("users"), int("expires_at")])
         },
+        // Personal API keys (see `auth::ApiUser`). Only a hash of the key is stored.
+        Table {
+            unique: &[&["token_hash"]],
+            ..table(
+                "api_keys",
+                vec![
+                    id(),
+                    int("user_id").owned_by("users"),
+                    key("name"),
+                    key("token_hash"),
+                    key("prefix"), // the first characters of the key, so its owner can tell keys apart
+                    stamp("created_at"),
+                    key("last_used").null(),
+                    int("expires_at").null(), // epoch seconds; NULL never expires
+                ],
+            )
+        },
         Table {
             primary_key: &["state"],
             ..table("oidc_states", vec![key("state"), key("nonce"), key("verifier"), int("expires_at")])

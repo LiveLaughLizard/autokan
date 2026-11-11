@@ -1,4 +1,5 @@
-// Autokan front-end glue: drag and drop, the card modal, media uploads and the agent console.
+// Autokan front-end glue: drag and drop, the card modal, media uploads, the agent console and
+// the "Send To Agent" dock.
 // Everything else is server-rendered HTML driven by htmx.
 (() => {
   const $ = (sel, root = document) => root.querySelector(sel);
@@ -251,6 +252,28 @@
     if (box) box.scrollTop = box.scrollHeight;
   }
 
+  // POST one agent turn and pass each event of the server's stream to `handle`.
+  async function streamTurn(url, data, handle, signal) {
+    const r = await fetch(url, { method: "POST", body: data ? new URLSearchParams(data) : undefined, signal });
+    if (!r.ok) throw new Error((await r.text()) || `Request failed (${r.status})`);
+    const reader = r.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      let i;
+      while ((i = buf.indexOf("\n\n")) >= 0) {
+        const block = buf.slice(0, i);
+        buf = buf.slice(i + 2);
+        for (const line of block.split("\n")) {
+          if (line.startsWith("data:")) handle(JSON.parse(line.slice(5)));
+        }
+      }
+    }
+  }
+
   if (panel) {
     const boardId = panel.dataset.boardId;
     const form = $("#agent-form");
@@ -275,7 +298,7 @@
     };
     const errorLine = (message) => box.append(el("div", "alert alert-error text-sm my-1", message));
 
-    // Send one turn and render the server's event stream (text deltas, tool calls, board refreshes).
+    // Send one console turn and render the server's event stream (text deltas, tool calls, board refreshes).
     async function run(url, data, userText) {
       if (busy) return;
       busy = true;
@@ -311,24 +334,7 @@
       };
 
       try {
-        const r = await fetch(url, { method: "POST", body: data ? new URLSearchParams(data) : undefined });
-        if (!r.ok) throw new Error((await r.text()) || `Request failed (${r.status})`);
-        const reader = r.body.getReader();
-        const decoder = new TextDecoder();
-        let buf = "";
-        for (;;) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buf += decoder.decode(value, { stream: true });
-          let i;
-          while ((i = buf.indexOf("\n\n")) >= 0) {
-            const block = buf.slice(0, i);
-            buf = buf.slice(i + 2);
-            for (const line of block.split("\n")) {
-              if (line.startsWith("data:")) handle(JSON.parse(line.slice(5)));
-            }
-          }
-        }
+        await streamTurn(url, data, handle);
       } catch (err) {
         error = error || err.message;
       }
@@ -341,6 +347,105 @@
       }
       if (error) errorLine(error);
       scrollAgent();
+      refreshBoard();
+      busy = false;
+      sendBtn.disabled = false;
+    }
+
+    // ---- "Send To Agent": one tab per run in the dock at the bottom of the board ------------
+
+    const dock = $("#agent-dock");
+    const dockTabs = $("#agent-dock-tabs");
+    const dockConsole = $("#agent-dock-console");
+    let shown = null; // the run whose console is open
+
+    function showRun(run) {
+      shown = run;
+      dockConsole.classList.toggle("hidden", !run);
+      for (const t of dockTabs.children) t.classList.toggle("btn-active", t === run?.tab);
+      for (const l of dockConsole.children) l.classList.toggle("hidden", l !== run?.log);
+      if (run) dockConsole.scrollTop = dockConsole.scrollHeight;
+    }
+
+    async function sendColumn(columnId, name, cardCount) {
+      busy = true;
+      sendBtn.disabled = true;
+      const run = { done: false, abort: new AbortController() };
+      run.log = el("div", "hidden flex flex-col gap-0.5");
+      run.tab = el("button", "btn btn-xs gap-1 shrink-0");
+      run.tab.type = "button";
+      const icon = el("span", "loading loading-spinner loading-xs");
+      const close = el("span", "opacity-50 hover:opacity-100 pl-1", "✕");
+      close.title = "Stop";
+      run.tab.append(icon, el("span", "max-w-40 truncate", `✦ ${name}`), close);
+      run.tab.title = "Show what the agent is doing";
+      dockTabs.append(run.tab);
+      dockConsole.append(run.log);
+      dock.classList.remove("hidden");
+
+      // Keep the console pinned to the newest line unless the reader has scrolled up.
+      const follow = (change) => {
+        const pinned = dockConsole.scrollHeight - dockConsole.scrollTop - dockConsole.clientHeight < 40;
+        const out = change();
+        if (shown === run && pinned) dockConsole.scrollTop = dockConsole.scrollHeight;
+        return out;
+      };
+      const line = (text, cls = "") =>
+        follow(() => {
+          const row = el("div", `flex gap-2 ${cls}`);
+          const body = el("span", "whitespace-pre-wrap break-words min-w-0", text);
+          row.append(el("span", "opacity-50 shrink-0", new Date().toLocaleTimeString()), body);
+          run.log.append(row);
+          return body;
+        });
+
+      run.tab.addEventListener("click", (e) => {
+        if (e.target !== close) return showRun(shown === run ? null : run);
+        if (!run.done) {
+          if (confirm(`Stop the agent working on “${name}”? Changes it has already made are kept.`)) run.abort.abort();
+          return;
+        }
+        if (shown === run) showRun(null);
+        run.tab.remove();
+        run.log.remove();
+        if (!dockTabs.children.length) dock.classList.add("hidden");
+      });
+
+      line(`Sent “${name}” to the agent (${cardCount} card${cardCount === 1 ? "" : "s"})`);
+      let live = null; // the line the agent's current message is streaming into
+      let error = null;
+      try {
+        await streamTurn(
+          `/columns/${columnId}/agent`,
+          null,
+          (ev) => {
+            if (ev.type === "delta") {
+              if (!live) live = line("");
+              follow(() => (live.textContent += ev.text));
+            } else if (ev.type === "tool") {
+              live = null;
+              line(`${ev.ok ? "✓" : "✗"} ${ev.name} ${ev.arguments}${ev.error ? ` — ${ev.error}` : ""}`, ev.ok ? "opacity-80" : "text-error");
+            } else if (ev.type === "meta") {
+              line(`Model: ${ev.model}`, "opacity-60");
+            } else if (ev.type === "refresh") {
+              refreshBoard();
+            } else if (ev.type === "error") {
+              error = ev.message;
+            }
+          },
+          run.abort.signal
+        );
+      } catch (err) {
+        error = error || (run.abort.signal.aborted ? "Stopped" : err.message);
+      }
+
+      run.done = true;
+      line(error ? `Failed: ${error}` : "Finished", error ? "text-error" : "text-success");
+      icon.className = error ? "text-error" : "text-success";
+      icon.textContent = error ? "✗" : "✓";
+      close.title = "Close";
+      if (error && shown !== run) toast(`Send To Agent · ${name}: ${error}`);
+      htmx.trigger(document.body, "agent-history"); // the run is also part of the saved conversation
       refreshBoard();
       busy = false;
       sendBtn.disabled = false;
@@ -370,8 +475,8 @@
       const send = e.target.closest("[data-send-column]");
       if (send) {
         if (busy) return toast("The agent is still working on the previous request", "warning");
-        const name = send.closest(".column")?.querySelector("h3")?.textContent || "column";
-        run(`/columns/${send.dataset.sendColumn}/agent`, null, `Send To Agent · ${name}\n\n${send.title}`);
+        const column = send.closest(".column");
+        sendColumn(send.dataset.sendColumn, column?.querySelector("h3")?.textContent || "column", column?.querySelectorAll(".card-item").length || 0);
       }
     });
   }

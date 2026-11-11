@@ -1,5 +1,6 @@
 mod admin;
 mod agent;
+mod api;
 mod board;
 mod card;
 mod jira;
@@ -94,6 +95,14 @@ pub fn router(state: AppState) -> Router {
         .route("/boards/{id}/agent/chat", post(agent::chat))
         .route("/boards/{id}/agent/reset", post(agent::reset))
         .route("/columns/{id}/agent", post(agent::send_column))
+        // API keys, and what they open: the JSON API and the MCP server
+        .route("/account/keys", get(api::keys_page).post(api::create_key))
+        .route("/account/keys/{id}/delete", post(api::delete_key))
+        .route("/api/v1/boards", get(api::boards))
+        .route("/api/v1/boards/{id}", get(api::board))
+        .route("/api/v1/tools", get(api::tools))
+        .route("/api/v1/boards/{id}/tools/{name}", post(api::call))
+        .route("/mcp", post(api::mcp))
         // admin
         .route("/admin", get(admin::page_handler))
         .route("/admin/oidc", post(admin::save_oidc))

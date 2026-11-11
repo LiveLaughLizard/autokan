@@ -172,6 +172,9 @@ pub fn page(user: Option<&User>, title: &str, full: bool, body: Markup) -> Marku
                                     (u.username)
                                     @if u.is_breakglass() { " · break glass" }
                                 }
+                                @if u.has("api.keys") {
+                                    li { a href="/account/keys" { "API keys" } }
+                                }
                                 li {
                                     form method="post" action="/logout" class="p-0" {
                                         button class="w-full text-left px-3 py-1 cursor-pointer" { "Sign out" }
